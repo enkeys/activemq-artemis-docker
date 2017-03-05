@@ -1,38 +1,46 @@
 # ActiveMQ Artemis 1.5.0
 
-FROM java:8
-MAINTAINER Victor Romero <victor.romero@gmail.com>
+FROM alpine:latest
 
-# add user and group for artemis
-RUN groupadd -r artemis && useradd -r -g artemis artemis
+MAINTAINER Dominik Lenoch <dlenoch@redhat.com>
 
-RUN apt-get -qq -o=Dpkg::Use-Pty=0 update && apt-get -qq -o=Dpkg::Use-Pty=0 upgrade -y && \
-  apt-get -qq -o=Dpkg::Use-Pty=0 install -y --no-install-recommends libaio1 xmlstarlet && \
-  rm -rf /var/lib/apt/lists/*
+USER root
 
-# grab gosu for easy step-down from root
-ENV GOSU_VERSION 1.9
-RUN set -x \
-    && apt-get update && apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/* \
-    && dpkgArch="$(dpkg --print-architecture | awk -F- '{ print $NF }')" \
-    && wget -O /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch" \
-    && wget -O /usr/local/bin/gosu.asc "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch.asc" \
-    && export GNUPGHOME="$(mktemp -d)" \
-    && gpg --keyserver ha.pool.sks-keyservers.net --recv-keys B42F6819007F00F88E364FD4036A9C25BF357DD4 \
-    && gpg --batch --verify /usr/local/bin/gosu.asc /usr/local/bin/gosu \
-    && rm -r "$GNUPGHOME" /usr/local/bin/gosu.asc \
-    && chmod +x /usr/local/bin/gosu \
-    && gosu nobody true
+RUN apk update && apk upgrade && apk add \
+      ca-certificates \
+      gnupg \
+      su-exec \
+      tini \
+      openjdk8-jre-base \
+      libaio \
+      wget \
+      grep \
+      tar \
+    && rm -rf /var/cache/apk/*
 
-# Uncompress and validate
-RUN cd /opt && wget -q http://www-us.apache.org/dist/activemq/activemq-artemis/1.5.0/apache-artemis-1.5.0-bin.tar.gz && \
-  wget -q http://www.us.apache.org/dist/activemq/activemq-artemis/1.5.0/apache-artemis-1.5.0-bin.tar.gz.asc && \
-  wget -q http://apache.org/dist/activemq/KEYS && \
-  gpg --import KEYS && \
-  gpg apache-artemis-1.5.0-bin.tar.gz.asc && \
-  tar xfz apache-artemis-1.5.0-bin.tar.gz && \
-  ln -s apache-artemis-1.5.0 apache-artemis && \
-  rm -f apache-artemis-1.5.0-bin.tar.gz KEYS apache-artemis-1.5.0-bin.tar.gz.asc
+ENV JAVA_HOME /usr/lib/jvm/java-1.8-openjdk
+
+# create artemis user without password and home dir
+RUN addgroup -S artemis && adduser -s /bin/false -D -H artemis -G artemis
+
+# Setup broker
+RUN mkdir /opt && cd /opt && \
+    RELEASE=1.5.3 && \
+    URL=https://www-eu.apache.org/dist/activemq && \
+
+    TAR=apache-artemis-$RELEASE-bin.tar.gz && \
+    ASC=$TAR.asc && \
+
+    wget -q $URL/activemq-artemis/$RELEASE/$TAR && \
+    wget -q $URL/activemq-artemis/$RELEASE/$ASC && \
+    wget -q $URL/KEYS && \
+
+    gpg --import KEYS && \
+    gpg $ASC && \
+
+    tar xfz $TAR && \
+    ln -s apache-artemis-$RELEASE apache-artemis && \
+    rm -f $TAR $ASC KEYS
 
 # Web Server
 EXPOSE 8161
@@ -59,6 +67,7 @@ VOLUME ["/var/lib/artemis/etc"]
 
 WORKDIR /var/lib/artemis/bin
 
-COPY docker-entrypoint.sh /
-ENTRYPOINT ["/docker-entrypoint.sh"]
+COPY docker-entrypoint.sh /usr/local/bin/
+ENTRYPOINT ["/sbin/tini", "--", "docker-entrypoint.sh"]
+
 CMD ["artemis-server"]

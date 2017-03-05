@@ -1,49 +1,49 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
 WORKDIR=$(pwd)
-EFFECTIVE_ARTEMIS_USERNAME=${ARTEMIS_USERNAME:-artemis}
-EFFECTIVE_ARTEMIS_PASSWORD=${ARTEMIS_PASSWORD:-simetraehcapa}
+
+ENV_artemis_USER=${artemis_USER:-admin}
+ENV_artemis_PASSWORD=${artemis_PASSWORD:-topsecret007}
+ENV_artemis_ROLE=${artemis_ROLE:-amq}
+ENV_artemis_CLUSTER_USER=${artemis_ROLE:-artemisCluster}
+ENV_artemis_CLUSTER_PASSWORD=${artemis_ROLE:-topsecret007-cluster}
 
 if [ ! "$(ls -A /var/lib/artemis/etc)" ]; then
 	# Create broker instance
 	cd /var/lib && \
-	  /opt/apache-artemis-1.5.0/bin/artemis create artemis \
-		--home /opt/apache-artemis \
-		--user $EFFECTIVE_ARTEMIS_USERNAME \
-		--password $EFFECTIVE_ARTEMIS_PASSWORD \
-		--role amq \
+	  /opt/A-MQ7/bin/artemis create artemis \
+		--home /opt/A-MQ7 \
+		--user $ENV_artemis_USER \
+		--password $ENV_artemis_PASSWORD \
+		--role $ENV_artemis_ROLE \
 		--require-login \
-		--cluster-user artemisCluster \
-		--cluster-password simetraehcaparetsulc
+		--cluster-user $ENV_artemis_CLUSTER_USER \
+		--cluster-password $ENV_artemis_CLUSTER_PASSWORD
 
-	# Ports are only exposed with an explicit argument, there is no need to binding
-	# the web console to localhost
-	cd /var/lib/artemis/etc && \
-	  xmlstarlet ed -L -N amq="http://activemq.org/schema" \
-		-u "/amq:broker/amq:web/@bind" \
-		-v "http://0.0.0.0:8161" bootstrap.xml
+	# Get managment accesible from the outside
+	sed -ie 's/localhost:8161/0.0.0.0:8161/g' artemis/etc/bootstrap.xml
 
-	chown -R artemis.artemis /var/lib/artemis
-	
+  chown -R artemis:artemis /var/lib/artemis
+
 	cd $WORKDIR
 fi
 
 # Log to tty to enable docker logs container-name
-sed -i "s/logger.handlers=.*/logger.handlers=CONSOLE/g" ../etc/logging.properties
+sed -ie "s/logger.handlers=.*/logger.handlers=CONSOLE/g" ../etc/logging.properties
 
 # Update min memory if the argument is passed
 if [[ "$ARTEMIS_MIN_MEMORY" ]]; then
-  sed -i "s/-Xms512M/-Xms$ARTEMIS_MIN_MEMORY/g" ../etc/artemis.profile
+  sed -ie "s/-Xms512M/-Xms$ARTEMIS_MIN_MEMORY/g" ../etc/artemis.profile
 fi
 
 # Update max memory if the argument is passed
 if [[ "$ARTEMIS_MAX_MEMORY" ]]; then
-  sed -i "s/-Xmx1024M/-Xmx$ARTEMIS_MAX_MEMORY/g" ../etc/artemis.profile
+  sed -ie "s/-Xmx1024M/-Xmx$ARTEMIS_MAX_MEMORY/g" ../etc/artemis.profile
 fi
 
 if [ "$1" = 'artemis-server' ]; then
-	set -- gosu artemis "./artemis" "run"
+	exec su-exec artemis "./artemis" "run"
 fi
 
 exec "$@"
